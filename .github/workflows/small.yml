@@ -52,6 +52,9 @@ jobs:
           COPY Cargo.toml Cargo.lock ./
           COPY crates ./crates
           COPY --from=ui /src/apps/dist ./apps/dist
+          # 修复 axum root nesting 禁止错误（新版 axum 必须用 merge）
+          RUN find crates -name "*.rs" -exec sed -i 's/\.nest("\/",/\.merge(/g' {} + || true
+          RUN find crates -name "*.rs" -exec sed -i 's/\.nest_service("\/",/\.fallback_service(/g' {} + || true
           RUN cargo build -p codexmanager-service --release
           RUN cargo build -p codexmanager-web --release --features embedded-ui
           

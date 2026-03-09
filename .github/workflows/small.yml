@@ -58,23 +58,30 @@ jobs:
           RUN cargo build -p codexmanager-service --release
           RUN cargo build -p codexmanager-web --release --features embedded-ui
           
-          FROM alpine AS certs
+          FROM alpine
           RUN apk add --no-cache ca-certificates
-          
-          FROM scratch
-          COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
           COPY --from=builder /src/target/release/codexmanager-service /usr/local/bin/codexmanager-service
           COPY --from=builder /src/target/release/codexmanager-web /usr/local/bin/codexmanager-web
+          COPY <<'EOF' /entrypoint.sh
+          #!/bin/sh
+          set -e
+          echo "启动 codexmanager-service..."
+          /usr/local/bin/codexmanager-service &
+          sleep 3
+          echo "启动 codexmanager-web..."
+          exec /usr/local/bin/codexmanager-web
+          EOF
+          RUN chmod +x /entrypoint.sh
           ENV CODEXMANAGER_WEB_ADDR=0.0.0.0:48761
           ENV CODEXMANAGER_WEB_NO_OPEN=1
+          ENV CODEXMANAGER_WEB_NO_SPAWN_SERVICE=1
           ENV CODEXMANAGER_SERVICE_ADDR=127.0.0.1:48760
           ENV CODEXMANAGER_DB_PATH=/data/codexmanager.db
           ENV CODEXMANAGER_RPC_TOKEN_FILE=/data/codexmanager.rpc-token
           ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-          ENV PATH=/usr/local/bin:$PATH
           VOLUME ["/data"]
           EXPOSE 48761
-          ENTRYPOINT ["/usr/local/bin/codexmanager-web"]
+          ENTRYPOINT ["/entrypoint.sh"]
           EOL
 
       - uses: docker/setup-buildx-action@v3

@@ -52,7 +52,7 @@ jobs:
           COPY Cargo.toml Cargo.lock ./
           COPY crates ./crates
           COPY --from=ui /src/apps/dist ./apps/dist
-          # 修复 axum root nesting 禁止错误（新版 axum 必须用 merge）
+          # 修复 axum root nesting
           RUN find crates -name "*.rs" -exec sed -i 's/\.nest("\/",/\.merge(/g' {} + || true
           RUN find crates -name "*.rs" -exec sed -i 's/\.nest_service("\/",/\.fallback_service(/g' {} + || true
           RUN cargo build -p codexmanager-service --release
@@ -67,11 +67,11 @@ jobs:
           COPY --from=builder /src/target/release/codexmanager-web /usr/local/bin/codexmanager-web
           ENV CODEXMANAGER_WEB_ADDR=0.0.0.0:48761
           ENV CODEXMANAGER_WEB_NO_OPEN=1
-          ENV CODEXMANAGER_WEB_NO_SPAWN_SERVICE=0
           ENV CODEXMANAGER_SERVICE_ADDR=127.0.0.1:48760
           ENV CODEXMANAGER_DB_PATH=/data/codexmanager.db
           ENV CODEXMANAGER_RPC_TOKEN_FILE=/data/codexmanager.rpc-token
           ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          ENV PATH=/usr/local/bin:$PATH
           VOLUME ["/data"]
           EXPOSE 48761
           ENTRYPOINT ["/usr/local/bin/codexmanager-web"]

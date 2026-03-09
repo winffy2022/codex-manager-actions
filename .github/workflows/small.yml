@@ -2,8 +2,8 @@ name: Auto Build Codex-Manager (单容器 scratch 最小版)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * *'
+  # schedule:
+  #   - cron: '0 0 * * *'
 
 permissions:
   contents: write
@@ -89,7 +89,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/codexmanager:upstream-${{ needs.get-official-version.outputs.tag }}
-            ghcr.io/${{ github.repository_owner }}/codexmanager:latest
+            ghcr.io/${{ github.repository_owner }}/codex-manager:upstream-${{ needs.get-official-version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/codex-manager:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

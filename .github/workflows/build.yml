@@ -1,1 +1,124 @@
+name: Build Codex-Manager
 
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # 阶段 1: 构建前端 (pnpm)
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Install Dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - name: Build Frontend
+        run: pnpm -C apps run build
+
+      - name: Upload Frontend Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/dist
+
+  # 阶段 2: 构建多平台 Service（Rust）
+  build-service:
+    name: Build Service ${{ matrix.artifact }}
+    needs: build-frontend
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: linux-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download Frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/dist
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Service Binaries
+        run: |
+          cargo build -p codexmanager-service --release --target ${{ matrix.target }}
+          cargo build -p codexmanager-web --release --features embedded-ui --target ${{ matrix.target }}
+          cargo build -p codexmanager-start --release --target ${{ matrix.target }}
+
+      - name: Package Service Zip
+        shell: bash
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/codexmanager-service* release/ 2>/dev/null || true
+          cp target/${{ matrix.target }}/release/codexmanager-web* release/ 2>/dev/null || true
+          cp target/${{ matrix.target }}/release/codexmanager-start* release/ 2>/dev/null || true
+          cp README.md release/ 2>/dev/null || true
+          cd release && zip -r ../CodexManager-service-${{ matrix.artifact }}.zip .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-${{ matrix.artifact }}
+          path: CodexManager-service-${{ matrix.artifact }}.zip
+
+  # 阶段 3: 自动发布
+  release:
+    name: Create GitHub Release
+    needs: build-service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Service Zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: service-*
+          path: releases
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: releases/**/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

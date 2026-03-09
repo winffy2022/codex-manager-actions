@@ -1,0 +1,60 @@
+name: Auto Build Codex-Manager (最小镜像版 scratch)
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 0 * * *'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  get-official-version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get-tag.outputs.tag }}
+    steps:
+      - name: 获取官方最新版本
+        id: get-tag
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/qxcnm/Codex-Manager/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: get-official-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: service
+            dockerfile: docker/Dockerfile.service.min
+            image: codexmanager-service
+          - name: web
+            dockerfile: docker/Dockerfile.web.min
+            image: codexmanager-web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: qxcnm/Codex-Manager
+          ref: ${{ needs.get-official-version.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:upstream-${{ needs.get-official-version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

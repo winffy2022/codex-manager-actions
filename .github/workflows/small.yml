@@ -45,7 +45,7 @@ jobs:
           RUN pnpm run build
           
           FROM rust:1-alpine AS builder
-          RUN apk add --no-cache musl-dev openssl-dev pkg-config build-base
+          RUN apk add --no-cache musl-dev openssl-dev pkgconf build-base
           WORKDIR /src
           COPY Cargo.toml Cargo.lock ./
           COPY crates ./crates

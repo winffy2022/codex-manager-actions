@@ -1,0 +1,97 @@
+name: Auto Build Codex-Manager (单容器 scratch 最小版)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  get-official-version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get-tag.outputs.tag }}
+    steps:
+      - name: 获取官方最新版本
+        id: get-tag
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/qxcnm/Codex-Manager/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: get-official-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: qxcnm/Codex-Manager
+          ref: ${{ needs.get-official-version.outputs.tag }}
+
+      - name: 生成单容器最小镜像 Dockerfile
+        run: |
+          mkdir -p docker
+          cat > docker/Dockerfile.min << 'EOL'
+          FROM node:20-alpine AS ui
+          WORKDIR /src/apps
+          RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+          COPY apps/package.json apps/pnpm-lock.yaml apps/vite.config.js apps/index.html ./
+          COPY apps/src ./src
+          COPY apps/tests ./tests
+          COPY apps/scripts ./scripts
+          RUN pnpm install --frozen-lockfile
+          RUN pnpm run build
+          
+          FROM rust:1-alpine AS builder
+          RUN apk add --no-cache musl-dev openssl-dev pkg-config build-base
+          WORKDIR /src
+          COPY Cargo.toml Cargo.lock ./
+          COPY crates ./crates
+          COPY --from=ui /src/apps/dist ./apps/dist
+          RUN cargo build -p codexmanager-service --release
+          RUN cargo build -p codexmanager-web --release --features embedded-ui
+          
+          FROM alpine AS certs
+          RUN apk add --no-cache ca-certificates
+          
+          FROM scratch
+          COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+          COPY --from=builder /lib/ld-musl-x86_64.so.1 /lib/
+          COPY --from=builder /usr/lib/libcrypto.so.* /usr/lib/
+          COPY --from=builder /usr/lib/libssl.so.* /usr/lib/
+          COPY --from=builder /src/target/release/codexmanager-service /usr/local/bin/codexmanager-service
+          COPY --from=builder /src/target/release/codexmanager-web /usr/local/bin/codexmanager-web
+          ENV CODEXMANAGER_WEB_ADDR=0.0.0.0:48761
+          ENV CODEXMANAGER_WEB_NO_OPEN=1
+          ENV CODEXMANAGER_WEB_NO_SPAWN_SERVICE=0
+          ENV CODEXMANAGER_SERVICE_ADDR=127.0.0.1:48760
+          ENV CODEXMANAGER_DB_PATH=/data/codexmanager.db
+          ENV CODEXMANAGER_RPC_TOKEN_FILE=/data/codexmanager.rpc-token
+          ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          ENV LD_LIBRARY_PATH=/usr/lib
+          VOLUME ["/data"]
+          EXPOSE 48761
+          ENTRYPOINT ["/usr/local/bin/codexmanager-web"]
+          EOL
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.min
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/codexmanager:upstream-${{ needs.get-official-version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/codexmanager:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

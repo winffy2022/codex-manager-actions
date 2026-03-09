@@ -1,122 +1,83 @@
-name: Build Codex-Manager
-
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:          # 手动触发按钮
+  schedule:
+    - cron: '0 0 * * *'       # 每天 UTC 0 点（北京时间早上 8 点）自动检查官方最新版
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  # 阶段 1: 构建前端 (pnpm)
-  build-frontend:
-    name: Build Frontend
+  # 阶段 0: 自动获取官方最新 Release 版本
+  get-official-version:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get-tag.outputs.tag }}
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
+      - name: 获取官方最新版本
+        id: get-tag
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/qxcnm/Codex-Manager/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "✅ 官方最新版本: $TAG"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: apps/pnpm-lock.yaml
-
-      - name: Install Dependencies
-        run: pnpm -C apps install --frozen-lockfile
-
-      - name: Build Frontend
-        run: pnpm -C apps run build
-
-      - name: Upload Frontend Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: apps/dist
-
-  # 阶段 2: 构建多平台 Service（Rust）
-  build-service:
-    name: Build Service ${{ matrix.artifact }}
-    needs: build-frontend
+  # 阶段 1: 构建并推送 Docker 镜像（service + web，多架构）
+  build-and-push:
+    needs: get-official-version
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: linux-x86_64
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            artifact: linux-arm64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: windows-x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: macos-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: macos-arm64
-    runs-on: ${{ matrix.os }}
+          - name: service
+            dockerfile: docker/Dockerfile.service
+            image: codexmanager-service
+          - name: web
+            dockerfile: docker/Dockerfile.web
+            image: codexmanager-web
     steps:
-      - name: Checkout Source Code
+      - name: Checkout 官方最新版本
         uses: actions/checkout@v4
-
-      - name: Download Frontend
-        uses: actions/download-artifact@v4
         with:
-          name: frontend-dist
-          path: apps/dist
+          repository: qxcnm/Codex-Manager
+          ref: ${{ needs.get-official-version.outputs.tag }}
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          targets: ${{ matrix.target }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Service Binaries
-        run: |
-          cargo build -p codexmanager-service --release --target ${{ matrix.target }}
-          cargo build -p codexmanager-web --release --features embedded-ui --target ${{ matrix.target }}
-          cargo build -p codexmanager-start --release --target ${{ matrix.target }}
-
-      - name: Package Service Zip
-        shell: bash
-        run: |
-          mkdir -p release
-          cp target/${{ matrix.target }}/release/codexmanager-service* release/ 2>/dev/null || true
-          cp target/${{ matrix.target }}/release/codexmanager-web* release/ 2>/dev/null || true
-          cp target/${{ matrix.target }}/release/codexmanager-start* release/ 2>/dev/null || true
-          cp README.md release/ 2>/dev/null || true
-          cd release && zip -r ../CodexManager-service-${{ matrix.artifact }}.zip .
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
         with:
-          name: service-${{ matrix.artifact }}
-          path: CodexManager-service-${{ matrix.artifact }}.zip
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:upstream-${{ needs.get-official-version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  # 阶段 3: 自动发布
+  # 阶段 2: 创建 GitHub Release（跟随官方版本）
   release:
     name: Create GitHub Release
-    needs: build-service
+    needs: [get-official-version, build-and-push]
     runs-on: ubuntu-latest
     steps:
-      - name: Download All Service Zips
-        uses: actions/download-artifact@v4
-        with:
-          pattern: service-*
-          path: releases
-
-      - name: Release
+      - name: Release (自动跟随官方版本)
         uses: softprops/action-gh-release@v2
         with:
-          files: releases/**/*.zip
+          tag_name: upstream-${{ needs.get-official-version.outputs.tag }}
+          name: Auto Sync from official ${{ needs.get-official-version.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true

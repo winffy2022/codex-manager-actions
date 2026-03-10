@@ -1,6 +1,5 @@
 name: Auto Build Codex-Manager (双容器 Alpine 最小版)
-on: 
-  workflow_dispatch:
+on: workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,7 +26,7 @@ jobs:
           repository: qxcnm/Codex-Manager
           ref: ${{ needs.get-official-version.outputs.tag }}
 
-      - name: Patch 官方 Dockerfile 为双容器 Alpine 最小版
+      - name: Patch 官方 Dockerfile + 修复 axum routing
         run: |
           mkdir -p docker
           
@@ -49,6 +48,11 @@ jobs:
           sed -i 's|^FROM debian:bookworm-slim|FROM alpine|' docker/Dockerfile.web.min
           sed -i '/apt-get update && apt-get install -y --no-install-recommends ca-certificates/d' docker/Dockerfile.web.min
           sed -i '/^WORKDIR \/app$/a RUN apk add --no-cache ca-certificates' docker/Dockerfile.web.min
+
+          # === Fix axum v0.8+ root nesting panic in web ===
+          sed -i 's|\.nest("/",|\.merge(|g' crates/web/src/main.rs
+          sed -i 's|\.nest( "/",|\.merge(|g' crates/web/src/main.rs
+          sed -i 's|nest("/",|merge(|g' crates/web/src/main.rs
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3

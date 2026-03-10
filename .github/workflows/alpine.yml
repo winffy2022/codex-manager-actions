@@ -1,5 +1,6 @@
 name: Auto Build Codex-Manager (双容器 Alpine 最小版)
-on: workflow_dispatch:
+on: 
+  workflow_dispatch:
 
 permissions:
   contents: write

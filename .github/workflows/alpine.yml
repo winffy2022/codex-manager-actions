@@ -31,24 +31,24 @@ jobs:
         run: |
           mkdir -p docker
           
-          # Patch codexmgr-service
+          # === Patch codexmgr-service ===
           cp docker/Dockerfile.service docker/Dockerfile.service.min
-          sed -i 's|FROM rust:1-bookworm AS builder|FROM rust:1-alpine AS builder|' docker/Dockerfile.service.min
+          sed -i 's|^FROM rust:1-bookworm AS builder|FROM rust:1-alpine AS builder|' docker/Dockerfile.service.min
           sed -i '/^WORKDIR \/src$/a RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base' docker/Dockerfile.service.min
-          sed -i '/RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base/a ENV OPENSSL_STATIC=1ENV PKG_CONFIG_ALLOW_CROSS=1' docker/Dockerfile.service.min
-          sed -i 's|FROM debian:bookworm-slim|FROM alpine|' docker/Dockerfile.service.min
-          sed -i 's|RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*|RUN apk add --no-cache ca-certificates|' docker/Dockerfile.service.min
-          sed -i 's|CMD \["codexmanager-service"\]|ENTRYPOINT ["codexmanager-service"]|' docker/Dockerfile.service.min
+          sed -i '/^RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base/a ENV OPENSSL_STATIC=1ENV PKG_CONFIG_ALLOW_CROSS=1' docker/Dockerfile.service.min
+          sed -i 's|^FROM debian:bookworm-slim|FROM alpine|' docker/Dockerfile.service.min
+          sed -i '/apt-get update && apt-get install -y --no-install-recommends ca-certificates/d' docker/Dockerfile.service.min
+          sed -i '/^WORKDIR \/app$/a RUN apk add --no-cache ca-certificates' docker/Dockerfile.service.min
           
-          # Patch codexmgr-web
+          # === Patch codexmgr-web ===
           cp docker/Dockerfile.web docker/Dockerfile.web.min
-          sed -i 's|FROM node:20-bookworm-slim AS ui|FROM node:20-alpine AS ui|' docker/Dockerfile.web.min
-          sed -i 's|FROM rust:1-bookworm AS builder|FROM rust:1-alpine AS builder|' docker/Dockerfile.web.min
+          sed -i 's|^FROM node:20-bookworm-slim AS ui|FROM node:20-alpine AS ui|' docker/Dockerfile.web.min
+          sed -i 's|^FROM rust:1-bookworm AS builder|FROM rust:1-alpine AS builder|' docker/Dockerfile.web.min
           sed -i '/^WORKDIR \/src$/a RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base' docker/Dockerfile.web.min
-          sed -i '/RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base/a ENV OPENSSL_STATIC=1ENV PKG_CONFIG_ALLOW_CROSS=1' docker/Dockerfile.web.min
-          sed -i 's|FROM debian:bookworm-slim|FROM alpine|' docker/Dockerfile.web.min
-          sed -i 's|RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*|RUN apk add --no-cache ca-certificates|' docker/Dockerfile.web.min
-          sed -i 's|CMD \["codexmanager-web"\]|ENTRYPOINT ["codexmanager-web"]|' docker/Dockerfile.web.min
+          sed -i '/^RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf build-base/a ENV OPENSSL_STATIC=1ENV PKG_CONFIG_ALLOW_CROSS=1' docker/Dockerfile.web.min
+          sed -i 's|^FROM debian:bookworm-slim|FROM alpine|' docker/Dockerfile.web.min
+          sed -i '/apt-get update && apt-get install -y --no-install-recommends ca-certificates/d' docker/Dockerfile.web.min
+          sed -i '/^WORKDIR \/app$/a RUN apk add --no-cache ca-certificates' docker/Dockerfile.web.min
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
